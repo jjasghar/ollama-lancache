@@ -17,11 +17,15 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "ollama-lancache",
 		Short: "Model distribution system for Ollama",
-		Long: `Ollama LanCache is a model distribution system that provides efficient sharing 
-of Ollama models across a local network. It offers two approaches:
+		Long: `Ollama LanCache is a comprehensive model distribution system for efficiently sharing 
+Ollama models across a local network. 
 
-1. ollama-lancache (Recommended): Simple HTTP server with client scripts
-2. Registry Proxy (Advanced): Transparent proxy for Ollama registry requests
+Features:
+- High-performance HTTP server with session tracking
+- Cross-platform client scripts (Windows PowerShell, Linux/macOS Bash)
+- Real-time monitoring with web interface and REST API
+- File downloads server for additional resources
+- Multi-client support with concurrent download tracking
 
 This reduces bandwidth usage by allowing clients to download models from a local 
 server instead of the internet.`,
@@ -46,14 +50,6 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.ollama-lancache.yaml)")
-	rootCmd.PersistentFlags().String("cache-dir", "", "directory to store cached models (default: ~/.ollama-lancache)")
-	rootCmd.PersistentFlags().String("listen-addr", "0.0.0.0", "address to listen on")
-	rootCmd.PersistentFlags().Int("http-port", 443, "HTTP proxy port")
-	rootCmd.PersistentFlags().Int("dns-port", 53, "DNS server port")
-	rootCmd.PersistentFlags().Bool("dns-enabled", true, "enable DNS server")
-	rootCmd.PersistentFlags().Bool("http-enabled", true, "enable HTTP proxy")
-	rootCmd.PersistentFlags().String("upstream-dns", "8.8.8.8:53", "upstream DNS server")
-	rootCmd.PersistentFlags().String("ollama-registry", "registry.ollama.ai", "Ollama registry hostname to intercept")
 	
 	viper.BindPFlags(rootCmd.PersistentFlags())
 }

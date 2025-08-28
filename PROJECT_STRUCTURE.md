@@ -11,31 +11,17 @@ ollama-lancache/
 │       ├── ci.yml         # Continuous integration pipeline
 │       └── release.yml    # Release automation
 ├── cmd/                   # CLI command implementations
-│   ├── cache.go          # Cache management commands
 │   ├── root.go           # Root command and configuration
-│   ├── serve.go          # Model distribution server
-│   └── server.go         # Registry proxy server
+│   └── serve.go          # HTTP model distribution server
 ├── examples/             # Usage examples and deployment scenarios
 │   ├── client-install-examples.md  # Client installation examples
 │   ├── docker-compose-simple.yml   # Simple Docker deployment
 │   └── systemd-service.sh          # Systemd service installer
-├── internal/            # Private application packages
-│   ├── cache/           # Cache management logic
-│   │   ├── cache.go     # Cache implementation
-│   │   └── cache_test.go # Cache tests
-│   ├── dns/             # DNS server implementation
-│   │   ├── server.go    # DNS server logic
-│   │   └── server_test.go # DNS tests
-│   └── proxy/           # HTTP proxy implementation
-│       ├── server.go    # Proxy server logic
-│       └── server_test.go # Proxy tests
 ├── scripts/             # Client installation scripts
 │   ├── install.ps1      # PowerShell client (Windows)
 │   └── install.sh       # Bash client (Linux/macOS)
-├── test/                # Integration and end-to-end tests
-│   ├── cache_miss_test.go       # Cache miss testing
-│   ├── integration_test.go      # Integration tests
-│   └── live_cache_miss_demo.go  # Live demo tests
+├── downloads/           # File downloads directory (created at runtime)
+│   └── README.txt       # Usage instructions for downloads
 ├── CHANGELOG.md         # Version history and changes
 ├── CONTRIBUTING.md      # Contribution guidelines
 ├── Dockerfile          # Multi-stage Docker build
@@ -45,249 +31,160 @@ ollama-lancache/
 ├── LICENSE             # MIT license
 ├── main.go             # Application entry point
 ├── Makefile            # Build automation and tasks
+├── PROJECT_STRUCTURE.md # This file
 └── README.md           # Main project documentation
 ```
 
 ## Core Components
 
-### 1. ollama-lancache Server (`cmd/serve.go`)
+### 1. HTTP Server (`cmd/serve.go`)
 
-**Purpose**: Simple HTTP server for distributing cached Ollama models
+The main application component that provides:
+- **Model serving**: Serves Ollama models from `~/.ollama/models`
+- **Web interface**: Clean HTML interface with model catalog and usage instructions
+- **Session tracking**: Real-time monitoring of client downloads with progress tracking
+- **File downloads**: Additional file server at `/downloads/` endpoint
+- **REST API**: JSON endpoints for programmatic access
+- **Client scripts**: Dynamic generation of platform-specific installation scripts
 
-**Features**:
-- Web interface for browsing models
-- API endpoints for programmatic access
-- Cross-platform client scripts
-- Automatic model discovery
-- Progress tracking
+### 2. Client Scripts (`scripts/`)
 
-**Key Files**:
-- `cmd/serve.go` - Server implementation
-- `scripts/install.ps1` - Windows PowerShell client
-- `scripts/install.sh` - Linux/macOS Bash client
+Cross-platform installation scripts that handle model downloads:
 
-### 2. Registry Proxy Server (`cmd/server.go`)
+#### PowerShell Script (`install.ps1`)
+- **Platform**: Windows
+- **Features**: Environment variable support, smart defaults, auto-server detection
+- **Usage**: `powershell -c "irm http://server:8080/install.ps1 | iex"`
 
-**Purpose**: Transparent proxy that intercepts Ollama registry requests
+#### Bash Script (`install.sh`)
+- **Platform**: Linux/macOS
+- **Features**: Command-line arguments, JSON parsing with jq fallback
+- **Usage**: `curl -fsSL http://server:8080/install.sh | bash -s -- --server server:8080 --model model:tag`
 
-**Features**:
-- DNS interception for registry.ollama.ai
-- Docker Registry v2 API compatibility
-- HTTP caching with range request support
-- Blob and manifest caching
+### 3. Web Interface
 
-**Key Files**:
-- `cmd/server.go` - Proxy server implementation
-- `internal/proxy/server.go` - Core proxy logic
-- `internal/dns/server.go` - DNS server implementation
-- `internal/cache/cache.go` - Cache management
+Responsive HTML interface providing:
+- **Model catalog** with sizes and modification dates
+- **Copy-paste commands** for all platforms with real server URLs
+- **Session monitoring** via `/api/sessions` endpoint
+- **File downloads browser** at `/downloads/`
+- **API documentation** with clickable endpoints
 
-### 3. Client Scripts (`scripts/`)
+### 4. REST API Endpoints
 
-**Purpose**: Platform-specific installation scripts for easy model deployment
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Main web interface |
+| `/api/models` | GET | List available models (JSON) |
+| `/api/info` | GET | Server information and statistics |
+| `/api/sessions` | GET | Active download sessions with progress |
+| `/install.ps1` | GET | PowerShell client script |
+| `/install.sh` | GET | Bash client script |
+| `/downloads/` | GET | File downloads browser |
+| `/downloads/{file}` | GET | Direct file download |
+| `/manifests/{model}` | GET | Model manifest files |
+| `/blobs/{digest}` | GET | Model blob files |
+| `/health` | GET | Health check endpoint |
 
-**PowerShell Script (`install.ps1`)**:
-- Windows-compatible installation
-- Automatic server detection
-- Progress indicators and validation
-- Error handling and recovery
+## Key Features
 
-**Bash Script (`install.sh`)**:
-- Linux/macOS compatible installation
-- JSON parsing with jq fallback
-- Flexible parameter handling
-- Comprehensive error reporting
+### Session Tracking
+- **Real-time monitoring** of client downloads
+- **Progress tracking** with bytes served and completion percentage
+- **Multi-client support** with individual session management
+- **Automatic cleanup** of stale sessions (30-minute timeout)
 
-## Development Workflow
+### Security
+- **Path traversal protection** prevents `../` attacks in downloads
+- **Input validation** on all endpoints
+- **Safe file serving** with proper content types and headers
 
-### Building
+### Cross-Platform Support
+- **Windows**: PowerShell script with environment variable support
+- **Linux/macOS**: Bash script with command-line arguments
+- **Docker**: Multi-stage builds for containerized deployment
 
-```bash
-# Build for current platform
-make build
+### File Downloads Server
+- **Additional file sharing** alongside models
+- **Web browser interface** for easy file access
+- **Direct download URLs** for programmatic access
+- **Automatic directory creation** with proper permissions
 
-# Build for all platforms
-make build-all
+## Build System
 
-# Build with custom version
-VERSION=1.0.0 make build
-```
+### Makefile Targets
+- `make build` - Build binary for current platform
+- `make build-all` - Cross-compile for all platforms
+- `make test` - Run tests with coverage
+- `make run` - Build and run server
+- `make docker` - Build Docker image
+- `make clean` - Clean build artifacts
+
+### Docker Support
+- **Multi-stage build** for optimized image size
+- **Non-root execution** for security
+- **Volume mounts** for models and downloads
+- **Docker Compose** for easy deployment
+
+## Development
+
+### Project Layout
+The project follows Go standard layout:
+- `cmd/` - CLI commands and application entry points
+- `scripts/` - Client-side installation scripts
+- `examples/` - Usage examples and deployment scenarios
+- `.github/workflows/` - CI/CD automation
+
+### Dependencies
+- **Cobra** - CLI framework for command structure
+- **Viper** - Configuration management
+- **Standard library** - HTTP server, JSON handling, file operations
 
 ### Testing
-
-```bash
-# Run unit tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Run integration tests
-make test-integration
-
-# Run benchmarks
-make bench
-```
-
-### Quality Assurance
-
-```bash
-# Format code
-make fmt
-
-# Run linter
-make lint
-
-# Security scan
-make security
-
-# All quality checks
-make quality
-```
-
-### Development Server
-
-```bash
-# Start model distribution server
-make run
-
-# Start registry proxy server
-make run-server
-
-# Development mode with auto-reload
-make dev
-```
+- Unit tests for core functionality
+- Integration tests for client scripts
+- Docker-based testing for cross-platform compatibility
 
 ## Deployment Options
 
-### 1. Single Binary
-
+### 1. Binary Deployment
 ```bash
-# Download and install
-curl -L https://github.com/jjasghar/ollama-lancache/releases/latest/download/ollama-lancache-linux-amd64 -o ollama-lancache
-chmod +x ollama-lancache
 ./ollama-lancache serve --port 8080
 ```
 
-### 2. Docker
-
+### 2. Docker Deployment
 ```bash
-# Simple deployment
-docker run -p 8080:8080 -v ~/.ollama/models:/models ghcr.io/jjasghar/ollama-lancache:latest
-
-# Using Docker Compose
 docker-compose up -d
 ```
 
 ### 3. Systemd Service
-
 ```bash
-# Install as system service
 sudo ./examples/systemd-service.sh
 ```
 
 ## Configuration
 
+### Command Line Flags
+- `--port` - HTTP server port (default: 8080)
+- `--bind` - IP address to bind to (default: 0.0.0.0)
+- `--models-dir` - Models directory (default: ~/.ollama/models)
+
 ### Environment Variables
+- `OLLAMA_MODELS` - Custom models directory
+- `OLLAMA_LANCACHE_PORT` - Server port
+- `OLLAMA_LANCACHE_BIND` - Bind address
 
-- `OLLAMA_MODELS` - Override default models directory
-- `OLLAMA_LANCACHE_PORT` - Default server port
-- `OLLAMA_LANCACHE_HOST` - Server bind address
+## Architecture
 
-### Configuration File
+The ollama-lancache follows a simple client-server architecture:
 
-Location: `~/.ollama-lancache.yaml`
+1. **Server**: HTTP server that serves models and provides web interface
+2. **Clients**: Platform-specific scripts that download and install models
+3. **Storage**: File system storage for models and additional downloads
+4. **Monitoring**: Real-time session tracking and REST API
 
-```yaml
-# Model distribution server
-serve:
-  port: 8080
-  host: "0.0.0.0"
-  models-dir: "~/.ollama/models"
-
-# Registry proxy server
-server:
-  cache-dir: "~/.ollama/models"
-  listen-addr: "0.0.0.0"
-  http-port: 80
-  dns-port: 53
-  dns-enabled: true
-```
-
-## API Endpoints
-
-### ollama-lancache Server
-
-- `GET /` - Web interface
-- `GET /api/models` - List available models (JSON)
-- `GET /api/info` - Server information (JSON)
-- `GET /install.ps1` - PowerShell client script
-- `GET /install.sh` - Bash client script
-- `GET /models/{model}:{tag}` - Download model
-- `GET /manifests/{model}:{tag}` - Download manifest
-- `GET /blobs/{digest}` - Download blob
-
-### Registry Proxy Server
-
-- `GET /health` - Health check
-- `GET /v2/` - Docker Registry v2 API root
-- `GET /v2/{name}/manifests/{reference}` - Model manifests
-- `GET /v2/{name}/blobs/{digest}` - Model blobs
-- `GET /cache/stats` - Cache statistics
-
-## Testing Strategy
-
-### Unit Tests
-- Individual component testing
-- Mock external dependencies
-- High coverage targets (>80%)
-
-### Integration Tests
-- End-to-end workflow testing
-- Client-server interaction validation
-- Error scenario testing
-
-### Performance Tests
-- Load testing with multiple clients
-- Large model transfer benchmarks
-- Memory and CPU profiling
-
-## Security Considerations
-
-### Network Security
-- Non-privileged port defaults
-- Input validation and sanitization
-- Rate limiting (future enhancement)
-
-### Container Security
-- Non-root user execution
-- Minimal base images
-- Security scanning in CI
-
-### Access Control
-- File system permissions
-- Network access controls
-- Audit logging (future enhancement)
-
-## Contributing
-
-1. **Setup**: Follow development setup in `CONTRIBUTING.md`
-2. **Branching**: Use feature branches from `main`
-3. **Testing**: Ensure all tests pass and coverage is maintained
-4. **Documentation**: Update relevant documentation
-5. **Review**: Submit pull request for review
-
-## Release Process
-
-1. **Version Bump**: Update version in appropriate files
-2. **Changelog**: Update `CHANGELOG.md` with changes
-3. **Tag**: Create git tag with version (e.g., `v1.0.0`)
-4. **CI/CD**: GitHub Actions builds and publishes releases
-5. **Docker**: Container images published to GitHub Container Registry
-
-## Support and Maintenance
-
-- **Issues**: GitHub Issues for bug reports
-- **Discussions**: GitHub Discussions for questions
-- **Security**: Private disclosure for security issues
-- **Documentation**: GitHub Wiki for additional docs
+This architecture provides:
+- **Simplicity**: No complex proxy or DNS configuration required
+- **Reliability**: Direct HTTP file serving with standard protocols
+- **Scalability**: Supports unlimited concurrent clients
+- **Maintainability**: Clear separation of concerns and minimal dependencies

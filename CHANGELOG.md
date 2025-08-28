@@ -8,21 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Model distribution server with web interface
-- PowerShell and Bash client scripts for easy model installation
-- Docker support with multi-stage builds
-- GitHub Actions CI/CD pipeline
-- Comprehensive documentation and examples
-- Support for multiple platforms (Linux, macOS, Windows)
-- API endpoints for programmatic access
-- Health checks and monitoring
-- Systemd service installation script
+- File downloads server at `/downloads/` endpoint for sharing additional files
+- Real-time session tracking with progress monitoring
+- Copy-paste ready commands in web interface
+- UTF-8 emoji support in web interface
+- Smart defaults in client scripts
+- Session timeout handling (30 minutes)
+- Multi-client concurrent download support
+
+### Removed
+- Legacy DNS proxy server components (no longer needed)
+- Registry proxy approach (simplified to HTTP-only)
+- Unused internal packages and test files
+- Complex DNS configuration requirements
 
 ### Changed
-- Restructured project to support both distribution server and registry proxy
-- Updated README with comprehensive documentation
-- Improved error handling and user feedback
-- Enhanced client scripts with better validation
+- Simplified architecture to HTTP-only model distribution
+- Updated README with current features and capabilities
+- Improved error handling and user feedback in client scripts
+- Enhanced web interface with better styling and copy-paste commands
+- Increased session timeout from 10 to 30 minutes for large downloads
 
 ### Fixed
 - Windows file path compatibility issues with blob storage
