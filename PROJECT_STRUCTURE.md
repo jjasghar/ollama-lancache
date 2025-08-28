@@ -50,7 +50,7 @@ ollama-lancache/
 
 ## Core Components
 
-### 1. Model Distribution Server (`cmd/serve.go`)
+### 1. ollama-lancache Server (`cmd/serve.go`)
 
 **Purpose**: Simple HTTP server for distributing cached Ollama models
 
@@ -216,7 +216,7 @@ server:
 
 ## API Endpoints
 
-### Model Distribution Server
+### ollama-lancache Server
 
 - `GET /` - Web interface
 - `GET /api/models` - List available models (JSON)

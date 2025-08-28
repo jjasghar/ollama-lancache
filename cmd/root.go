@@ -20,7 +20,7 @@ var (
 		Long: `Ollama LanCache is a model distribution system that provides efficient sharing 
 of Ollama models across a local network. It offers two approaches:
 
-1. Model Distribution Server (Recommended): Simple HTTP server with client scripts
+1. ollama-lancache (Recommended): Simple HTTP server with client scripts
 2. Registry Proxy (Advanced): Transparent proxy for Ollama registry requests
 
 This reduces bandwidth usage by allowing clients to download models from a local 

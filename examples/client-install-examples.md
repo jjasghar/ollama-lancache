@@ -7,27 +7,31 @@ This document provides various examples of how to install models using the Ollam
 ### Windows PowerShell
 
 ```powershell
-# List available models
+# List available models (uses smart default server)
 powershell -c "irm http://192.168.1.100:8080/install.ps1 | iex"
+# Script will prompt: "Press Enter to accept default, or type custom server address"
+# Just press Enter to use http://192.168.1.100:8080
 
 # Install a specific model
 powershell -c "`$env:OLLAMA_MODEL='granite3.3:8b'; irm http://192.168.1.100:8080/install.ps1 | iex"
 
-# Install with custom server
-powershell -c "`$env:OLLAMA_SERVER='http://192.168.1.100:8080'; `$env:OLLAMA_MODEL='llama3.2:1b'; irm http://192.168.1.100:8080/install.ps1 | iex"
+# Download from your actual server (auto-detects server address)
+powershell -c "irm http://YOUR-SERVER-IP:8080/install.ps1 | iex"
 ```
 
 ### Linux/macOS Bash
 
 ```bash
-# List available models
+# List available models (uses smart default server)
 curl -fsSL http://192.168.1.100:8080/install.sh | bash
+# Script will prompt: "Press Enter to accept default, or type custom server address"
+# Just press Enter to use http://192.168.1.100:8080
 
 # Install a specific model
-curl -fsSL http://192.168.1.100:8080/install.sh | bash -s -- --model granite3.3:8b --server http://192.168.1.100:8080
+curl -fsSL http://192.168.1.100:8080/install.sh | bash -s -- --model granite3.3:8b
 
-# Install with verbose output
-curl -fsSL http://192.168.1.100:8080/install.sh | bash -s -- --model llama3.2:1b --server http://192.168.1.100:8080 --verbose
+# Download from your actual server (auto-detects server address)
+curl -fsSL http://YOUR-SERVER-IP:8080/install.sh | bash -s -- --model granite3.3:8b
 ```
 
 ## Advanced Examples

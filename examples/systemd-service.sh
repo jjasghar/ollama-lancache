@@ -39,7 +39,7 @@ fi
 echo "Creating systemd service file..."
 sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null << EOF
 [Unit]
-Description=Ollama LanCache Model Distribution Server
+Description=ollama-lancache
 Documentation=https://github.com/jjasghar/ollama-lancache
 After=network.target
 Wants=network.target

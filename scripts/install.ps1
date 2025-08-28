@@ -1,5 +1,5 @@
 # Ollama Model Installer for Windows
-# Downloads and installs models from the distribution server
+# Downloads and installs models from the ollama-lancache server
 
 param(
     [string]$Server = "",
@@ -24,7 +24,7 @@ function Show-Help {
     Write-Host "  `$env:OLLAMA_MODEL='granite3.3:8b'; irm http://SERVER:PORT/install.ps1 | iex"
     Write-Host ""
     Write-Host "PARAMETERS:" -ForegroundColor Yellow
-    Write-Host "  -Server   Distribution server address (e.g., 192.168.1.100:8080)"
+    Write-Host "  -Server   ollama-lancache server address (e.g., 192.168.1.100:8080)"
     Write-Host "  -Model    Model to install (e.g., granite3.3:8b)"
     Write-Host "  -List     List available models"
     Write-Host "  -Help     Show this help"
@@ -106,9 +106,19 @@ function Get-ServerFromRequest {
         return Get-Content (Join-Path $PSScriptRoot "server.txt") -Raw
     }
     
-    # Prompt user for server address
-    Write-Host "⚠️  Server address not provided" -ForegroundColor Yellow
-    $inputServer = Read-Host "Enter distribution server address (e.g., 192.168.1.100:8080)"
+    # Provide default server address with option to customize
+    $defaultServer = "http://192.168.1.100:8080"
+    Write-Host "🌐 Default server address: $defaultServer" -ForegroundColor Cyan
+    Write-Host "Press Enter to accept default, or type a custom server address:" -ForegroundColor Yellow
+    $inputServer = Read-Host "Server address"
+    
+    # Use default if user just pressed Enter
+    if ([string]::IsNullOrWhiteSpace($inputServer)) {
+        $inputServer = $defaultServer
+        Write-Host "✅ Using default server: $inputServer" -ForegroundColor Green
+    } else {
+        Write-Host "✅ Using custom server: $inputServer" -ForegroundColor Green
+    }
     
     # Ensure http:// prefix
     if ($inputServer -and !$inputServer.StartsWith("http")) {
@@ -169,6 +179,9 @@ function Install-Model {
         if (!(Test-Path $manifestsDir)) {
             New-Item -ItemType Directory -Path $manifestsDir -Force | Out-Null
         }
+        if (!(Test-Path $blobsDir)) {
+            New-Item -ItemType Directory -Path $blobsDir -Force | Out-Null
+        }
         
         # Download manifest
         Write-Host "📄 Downloading manifest..." -ForegroundColor Blue
@@ -203,7 +216,7 @@ function Install-Model {
                 continue
             }
             
-            # Use the correct blob URL for our model distribution server
+            # Use the correct blob URL for our ollama-lancache server
             $blobUrl = "$ServerUrl/blobs/$digest"
             
             # Download with progress
@@ -294,7 +307,7 @@ if ($Model) {
         Write-Error "Invalid model format. Use format: name:tag (e.g., granite3.3:8b)"
     }
 } else {
-    Write-Host "🚀 Ollama Model Distribution Client" -ForegroundColor Cyan
+    Write-Host "🚀 ollama-lancache Client" -ForegroundColor Cyan
     Write-Host ""
     Show-AvailableModels -Models $models
     Write-Host ""

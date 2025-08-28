@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -69,27 +70,232 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("Models directory does not exist: %s", modelsDir)
 	}
 	
+	// Create downloads directory if it doesn't exist
+	downloadsDir := "downloads"
+	if _, err := os.Stat(downloadsDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(downloadsDir, 0755); err != nil {
+			log.Printf("Warning: Could not create downloads directory: %v", err)
+		} else {
+			log.Printf("Created downloads directory: %s", downloadsDir)
+		}
+	}
+	
 	server := &ModelServer{
 		modelsDir: modelsDir,
 		bind:      bind,
 		port:      port,
+		sessions:  make(map[string]*DownloadSession),
 	}
 	
 	server.start()
+}
+
+// DownloadSession tracks a client's model download session
+type DownloadSession struct {
+	ClientIP    string
+	Model       string
+	StartTime   time.Time
+	LastActive  time.Time
+	BytesServed int64
+	TotalFiles  int
+	FilesServed int
 }
 
 type ModelServer struct {
 	modelsDir string
 	bind      string
 	port      int
+	sessions  map[string]*DownloadSession // Key: clientIP:model
+	sessionMu sync.RWMutex
+}
+
+// getSessionKey creates a unique key for tracking download sessions
+func (s *ModelServer) getSessionKey(clientIP, model string) string {
+	return fmt.Sprintf("%s:%s", clientIP, model)
+}
+
+// startSession begins tracking a new download session
+func (s *ModelServer) startSession(clientIP, model string, totalFiles int) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	
+	key := s.getSessionKey(clientIP, model)
+	session := &DownloadSession{
+		ClientIP:    clientIP,
+		Model:       model,
+		StartTime:   time.Now(),
+		LastActive:  time.Now(),
+		BytesServed: 0,
+		TotalFiles:  totalFiles,
+		FilesServed: 0,
+	}
+	s.sessions[key] = session
+	
+	log.Printf("🚀 [%s] Started downloading model: %s (estimated %d files)", clientIP, model, totalFiles)
+}
+
+// touchSession updates the LastActive timestamp for a session without changing progress
+func (s *ModelServer) touchSession(clientIP, model string) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	
+	key := s.getSessionKey(clientIP, model)
+	if session, exists := s.sessions[key]; exists {
+		session.LastActive = time.Now()
+	}
+}
+
+// updateSession updates an existing download session
+func (s *ModelServer) updateSession(clientIP, model string, bytesServed int64) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	
+	key := s.getSessionKey(clientIP, model)
+	if session, exists := s.sessions[key]; exists {
+		session.LastActive = time.Now()
+		session.BytesServed += bytesServed
+		session.FilesServed++
+	}
+}
+
+// finishSession manually completes a download session (used for cleanup)
+func (s *ModelServer) finishSession(clientIP, model string) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	
+	key := s.getSessionKey(clientIP, model)
+	if session, exists := s.sessions[key]; exists {
+		duration := time.Since(session.StartTime)
+		
+		log.Printf("🔄 [%s] Manually finishing session: %s", clientIP, model)
+		log.Printf("   📊 Duration: %v | Files: %d/%d | Data: %.2f MB", 
+			duration.Round(time.Second), 
+			session.FilesServed, 
+			session.TotalFiles,
+			float64(session.BytesServed)/1024/1024)
+		
+		delete(s.sessions, key)
+	}
+}
+
+// countModelFiles estimates the number of files for a model by counting blobs in manifest
+func (s *ModelServer) countModelFiles(name, tag string) int {
+	manifestPath := s.getManifestPath(name, tag)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return 3 // Default estimate: manifest + config + model blob
+	}
+	
+	// Count blob references in manifest (simplified)
+	blobCount := strings.Count(string(data), "sha256:")
+	if blobCount == 0 {
+		return 3 // Default fallback
+	}
+	return blobCount + 1 // +1 for manifest itself
+}
+
+// checkSessionCompletion checks if a download session should be finished
+func (s *ModelServer) checkSessionCompletion(clientIP, model string) {
+	s.sessionMu.Lock()
+	key := s.getSessionKey(clientIP, model)
+	session, exists := s.sessions[key]
+	
+	shouldFinish := false
+	if exists && session.FilesServed >= session.TotalFiles {
+		shouldFinish = true
+		delete(s.sessions, key) // Remove from map before unlocking
+	}
+	s.sessionMu.Unlock()
+	
+	// Call finishSession outside of lock to avoid deadlock
+	if shouldFinish {
+		duration := time.Since(session.StartTime)
+		avgSpeed := float64(session.BytesServed) / duration.Seconds() / 1024 / 1024 // MB/s
+		
+		log.Printf("✅ [%s] Completed downloading model: %s", clientIP, model)
+		log.Printf("   📊 Duration: %v | Files: %d/%d | Data: %.2f MB | Avg Speed: %.2f MB/s", 
+			duration.Round(time.Second), 
+			session.FilesServed, 
+			session.TotalFiles,
+			float64(session.BytesServed)/1024/1024,
+			avgSpeed)
+	}
+}
+
+// findActiveModel finds the most recent active model download session for a client
+func (s *ModelServer) findActiveModel(clientIP string) string {
+	s.sessionMu.RLock()
+	defer s.sessionMu.RUnlock()
+	
+	var mostRecentModel string
+	var mostRecentTime time.Time
+	
+	// Normalize the lookup IP (strip port if present)
+	lookupIP := clientIP
+	if strings.Contains(lookupIP, ":") {
+		if host, _, err := net.SplitHostPort(lookupIP); err == nil {
+			lookupIP = host
+		}
+	}
+	
+	for _, session := range s.sessions {
+		// Normalize the session IP for comparison
+		sessionIP := session.ClientIP
+		if strings.Contains(sessionIP, ":") {
+			if host, _, err := net.SplitHostPort(sessionIP); err == nil {
+				sessionIP = host
+			}
+		}
+		
+		if sessionIP == lookupIP {
+			if session.LastActive.After(mostRecentTime) {
+				mostRecentTime = session.LastActive
+				mostRecentModel = session.Model
+			}
+		}
+	}
+	
+	return mostRecentModel
+}
+
+// cleanupStaleSessions removes sessions that have been inactive for too long
+func (s *ModelServer) cleanupStaleSessions() {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	
+	now := time.Now()
+	staleTimeout := 30 * time.Minute // Consider sessions stale after 30 minutes of inactivity
+	
+	for key, session := range s.sessions {
+		if now.Sub(session.LastActive) > staleTimeout {
+			duration := now.Sub(session.StartTime)
+			log.Printf("⏰ [%s] Session timeout: %s (duration: %v, files: %d/%d)", 
+				session.ClientIP, 
+				session.Model, 
+				duration.Round(time.Second),
+				session.FilesServed,
+				session.TotalFiles)
+			delete(s.sessions, key)
+		}
+	}
 }
 
 func (s *ModelServer) start() {
+	// Start periodic cleanup of stale sessions
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.cleanupStaleSessions()
+		}
+	}()
+	
 	mux := http.NewServeMux()
 	
 	// API endpoints
 	mux.HandleFunc("/api/models", s.handleModelsAPI)
 	mux.HandleFunc("/api/info", s.handleServerInfo)
+	mux.HandleFunc("/api/sessions", s.handleSessionsAPI)
 	
 	// Model download endpoints
 	mux.HandleFunc("/models/", s.handleModelDownload)
@@ -99,6 +305,9 @@ func (s *ModelServer) start() {
 	// Client scripts
 	mux.HandleFunc("/install.ps1", s.handlePowerShellScript)
 	mux.HandleFunc("/install.sh", s.handleBashScript)
+	
+	// File downloads server
+	mux.HandleFunc("/downloads/", s.handleDownloadsServer)
 	
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +320,7 @@ func (s *ModelServer) start() {
 	
 	addr := fmt.Sprintf("%s:%d", s.bind, s.port)
 	
-	log.Printf("=== Ollama Model Distribution Server ===")
+	log.Printf("=== ollama-lancache ===")
 	log.Printf("Models Directory: %s", s.modelsDir)
 	log.Printf("Server listening on: http://%s", addr)
 	log.Printf("")
@@ -120,6 +329,7 @@ func (s *ModelServer) start() {
 	log.Printf("  GET  /api/info       - Server information")
 	log.Printf("  GET  /install.ps1    - PowerShell client script")
 	log.Printf("  GET  /install.sh     - Bash client script")
+	log.Printf("  GET  /downloads/     - File downloads server")
 	log.Printf("  GET  /health         - Health check")
 	log.Printf("")
 	log.Printf("🚀 Ready to serve models!")
@@ -257,6 +467,53 @@ func (s *ModelServer) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	log.Printf("ℹ️  [%s] Server info requested", getClientIP(r))
 }
 
+func (s *ModelServer) handleSessionsAPI(w http.ResponseWriter, r *http.Request) {
+	s.sessionMu.RLock()
+	defer s.sessionMu.RUnlock()
+	
+	type SessionInfo struct {
+		ClientIP      string    `json:"client_ip"`
+		Model         string    `json:"model"`
+		StartTime     time.Time `json:"start_time"`
+		Duration      string    `json:"duration"`
+		BytesServed   int64     `json:"bytes_served"`
+		FilesServed   int       `json:"files_served"`
+		TotalFiles    int       `json:"total_files"`
+		ProgressPct   float64   `json:"progress_percent"`
+	}
+	
+	var sessions []SessionInfo
+	now := time.Now()
+	
+	for _, session := range s.sessions {
+		progressPct := 0.0
+		if session.TotalFiles > 0 {
+			progressPct = (float64(session.FilesServed) / float64(session.TotalFiles)) * 100
+		}
+		
+		sessions = append(sessions, SessionInfo{
+			ClientIP:      session.ClientIP,
+			Model:         session.Model,
+			StartTime:     session.StartTime,
+			Duration:      now.Sub(session.StartTime).Round(time.Second).String(),
+			BytesServed:   session.BytesServed,
+			FilesServed:   session.FilesServed,
+			TotalFiles:    session.TotalFiles,
+			ProgressPct:   progressPct,
+		})
+	}
+	
+	response := map[string]interface{}{
+		"active_sessions": sessions,
+		"total_sessions":  len(sessions),
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+	
+	log.Printf("📊 [%s] Active sessions requested", getClientIP(r))
+}
+
 func (s *ModelServer) handleModelDownload(w http.ResponseWriter, r *http.Request) {
 	// Extract model name:tag from URL
 	path := strings.TrimPrefix(r.URL.Path, "/models/")
@@ -281,6 +538,8 @@ func (s *ModelServer) handleManifestDownload(w http.ResponseWriter, r *http.Requ
 	}
 	
 	name, tag := parts[0], parts[1]
+	model := fmt.Sprintf("%s:%s", name, tag)
+	clientIP := getClientIP(r)
 	manifestPath := s.getManifestPath(name, tag)
 	
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
@@ -288,14 +547,21 @@ func (s *ModelServer) handleManifestDownload(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	
+	// Count expected blobs for this model to track progress
+	expectedFiles := s.countModelFiles(name, tag)
+	
+	// Start tracking download session when manifest is first requested
+	s.startSession(clientIP, model, expectedFiles)
+	
 	w.Header().Set("Content-Type", "application/json")
 	http.ServeFile(w, r, manifestPath)
 	
-	log.Printf("📄 [%s] Manifest served: %s:%s", getClientIP(r), name, tag)
+	log.Printf("📄 [%s] Manifest served: %s (expecting %d files)", clientIP, model, expectedFiles)
 }
 
 func (s *ModelServer) handleBlobDownload(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/blobs/")
+	clientIP := getClientIP(r)
 	
 	// Convert colon to hyphen for file system compatibility
 	// Blobs are stored as sha256-abc123... but requested as sha256:abc123...
@@ -303,14 +569,45 @@ func (s *ModelServer) handleBlobDownload(w http.ResponseWriter, r *http.Request)
 	blobPath := filepath.Join(s.modelsDir, "blobs", blobFileName)
 	
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
+		log.Printf("❌ [%s] Blob not found: %s", clientIP, blobFileName[:12]+"...")
 		http.Error(w, "Blob not found", http.StatusNotFound)
 		return
+	}
+	
+	// Get file size for tracking
+	fileInfo, err := os.Stat(blobPath)
+	if err != nil {
+		log.Printf("❌ [%s] Error getting blob info: %s", clientIP, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	
+	// Touch session activity BEFORE starting the potentially long file transfer
+	model := s.findActiveModel(clientIP)
+	if model != "" {
+		s.touchSession(clientIP, model)
 	}
 	
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, blobPath)
 	
-	log.Printf("🗃️  [%s] Blob served: %s", getClientIP(r), path[:12]+"...")
+	// Update session progress - reuse model from above
+	if model != "" {
+		s.updateSession(clientIP, model, fileInfo.Size())
+		log.Printf("🗃️  [%s] Blob served: %s (%.2f MB) - %s", 
+			clientIP, 
+			path[:12]+"...", 
+			float64(fileInfo.Size())/1024/1024,
+			model)
+		
+		// Check if download session is complete
+		s.checkSessionCompletion(clientIP, model)
+	} else {
+		log.Printf("🗃️  [%s] Blob served: %s (%.2f MB) - no active session found", 
+			clientIP, 
+			path[:12]+"...", 
+			float64(fileInfo.Size())/1024/1024)
+	}
 }
 
 func (s *ModelServer) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -324,26 +621,31 @@ func (s *ModelServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	html := `<!DOCTYPE html>
 <html>
 <head>
-    <title>Ollama Model Distribution Server</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ollama-lancache</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
         .header { color: #333; }
         .models { margin: 20px 0; }
         .model { padding: 10px; border: 1px solid #ddd; margin: 5px 0; border-radius: 5px; }
         .usage { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        code { background: #eee; padding: 2px 5px; border-radius: 3px; }
+        code { background: #eee; padding: 8px 12px; border-radius: 3px; display: block; margin: 8px 0; font-family: 'Courier New', monospace; font-size: 13px; overflow-x: auto; }
     </style>
 </head>
 <body>
-    <h1 class="header">🚀 Ollama Model Distribution Server</h1>
+    <h1 class="header">🚀 ollama-lancache</h1>
     
     <div class="usage">
         <h3>📝 Client Usage:</h3>
         <p><strong>Windows PowerShell:</strong></p>
-        <code>powershell -c "irm http://` + r.Host + `/install.ps1 | iex"</code>
+        <code>$env:OLLAMA_MODEL='granite3.3:8b'; powershell -c "irm http://` + r.Host + `/install.ps1 | iex"</code>
         
         <p><strong>Linux/macOS:</strong></p>
-        <code>curl -fsSL http://` + r.Host + `/install.sh | bash</code>
+        <code>curl -fsSL http://` + r.Host + `/install.sh | bash -s -- --server ` + r.Host + ` --model granite3.3:8b</code>
+        
+        <p><strong>List available models:</strong></p>
+        <code>curl -fsSL http://` + r.Host + `/install.sh | bash -s -- --server ` + r.Host + ` --list</code>
     </div>
     
     <h3>📦 Available Models (` + fmt.Sprintf("%d", len(models)) + `):</h3>
@@ -366,11 +668,12 @@ func (s *ModelServer) handleRoot(w http.ResponseWriter, r *http.Request) {
         <li><a href="/api/info">GET /api/info</a> - Server information (JSON)</li>
         <li><a href="/install.ps1">GET /install.ps1</a> - PowerShell client script</li>
         <li><a href="/install.sh">GET /install.sh</a> - Bash client script</li>
+        <li><a href="/downloads/">GET /downloads/</a> - File downloads server</li>
     </ul>
 </body>
 </html>`
 	
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
 
@@ -408,6 +711,114 @@ func (s *ModelServer) handleBashScript(w http.ResponseWriter, r *http.Request) {
 	log.Printf("📥 [%s] Bash script downloaded", getClientIP(r))
 }
 
+func (s *ModelServer) handleDownloadsServer(w http.ResponseWriter, r *http.Request) {
+	// Remove the "/downloads/" prefix to get the file path
+	filePath := strings.TrimPrefix(r.URL.Path, "/downloads/")
+	
+	// Security: prevent directory traversal attacks
+	if strings.Contains(filePath, "..") {
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		return
+	}
+	
+	// If no file specified, show directory listing
+	if filePath == "" || filePath == "/" {
+		s.handleDownloadsListing(w, r)
+		return
+	}
+	
+	// Serve the requested file
+	fullPath := filepath.Join("downloads", filePath)
+	
+	// Check if file exists
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	
+	// Check if it's a directory
+	if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+		http.Error(w, "Directory access not allowed", http.StatusForbidden)
+		return
+	}
+	
+	// Serve the file
+	http.ServeFile(w, r, fullPath)
+	
+	log.Printf("📁 [%s] Downloaded file: %s", getClientIP(r), filePath)
+}
+
+func (s *ModelServer) handleDownloadsListing(w http.ResponseWriter, r *http.Request) {
+	files, err := os.ReadDir("downloads")
+	if err != nil {
+		http.Error(w, "Could not read downloads directory", http.StatusInternalServerError)
+		return
+	}
+	
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Downloads - ollama-lancache</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .header { color: #333; }
+        .file { padding: 10px; border: 1px solid #ddd; margin: 5px 0; border-radius: 5px; }
+        .file a { text-decoration: none; color: #0066cc; }
+        .file a:hover { text-decoration: underline; }
+        .size { color: #666; font-size: 0.9em; }
+        .empty { color: #999; font-style: italic; padding: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1 class="header">📁 Downloads</h1>
+    <p><a href="/">← Back to ollama-lancache</a></p>
+    
+    <div class="files">`
+	
+	if len(files) == 0 {
+		html += `<div class="empty">No files available for download</div>`
+	} else {
+		for _, file := range files {
+			if !file.IsDir() {
+				info, err := file.Info()
+				if err != nil {
+					continue
+				}
+				
+				size := float64(info.Size())
+				var sizeStr string
+				if size > 1024*1024*1024 {
+					sizeStr = fmt.Sprintf("%.2f GB", size/(1024*1024*1024))
+				} else if size > 1024*1024 {
+					sizeStr = fmt.Sprintf("%.2f MB", size/(1024*1024))
+				} else if size > 1024 {
+					sizeStr = fmt.Sprintf("%.2f KB", size/1024)
+				} else {
+					sizeStr = fmt.Sprintf("%.0f bytes", size)
+				}
+				
+				html += fmt.Sprintf(`
+        <div class="file">
+            <a href="/downloads/%s">📄 %s</a>
+            <div class="size">%s - Modified: %s</div>
+        </div>`, file.Name(), file.Name(), sizeStr, info.ModTime().Format("2006-01-02 15:04:05"))
+			}
+		}
+	}
+	
+	html += `
+    </div>
+</body>
+</html>`
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(html))
+	
+	log.Printf("📂 [%s] Downloads directory listing requested", getClientIP(r))
+}
+
 func getServerIPs() []string {
 	var ips []string
 	
@@ -440,5 +851,13 @@ func getClientIP(r *http.Request) string {
 	if ip == "" {
 		ip = r.RemoteAddr
 	}
+	
+	// Extract just the IP part (remove port if present)
+	if strings.Contains(ip, ":") {
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		}
+	}
+	
 	return ip
 }

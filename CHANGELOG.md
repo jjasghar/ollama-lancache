@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker registry v2 API compatibility
 
 ### Features
-- **Model Distribution Server**: Simple HTTP server for serving cached models
+- **ollama-lancache Server**: Simple HTTP server for serving cached models
   - Web interface for browsing available models
   - API endpoints for listing models and server information
   - Cross-platform client scripts (PowerShell and Bash)

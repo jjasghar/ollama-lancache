@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ollama Model Installer for Linux/macOS
-# Downloads and installs models from the distribution server
+# Downloads and installs models from the ollama-lancache server
 
 set -e
 
@@ -53,7 +53,7 @@ show_help() {
     echo "  curl -fsSL http://SERVER:PORT/install.sh | bash -s -- --server SERVER:PORT --model MODEL:TAG"
     echo ""
     echo -e "${YELLOW}PARAMETERS:${NC}"
-    echo "  --server   Distribution server address (e.g., 192.168.1.100:8080)"
+    echo "  --server   ollama-lancache server address (e.g., 192.168.1.100:8080)"
     echo "  --model    Model to install (e.g., granite3.3:8b)"
     echo "  --list     List available models"
     echo "  --help     Show this help"
@@ -81,31 +81,46 @@ test_ollama_installed() {
 }
 
 get_server_from_request() {
+    local server_result=""
+    
     # Try to extract server from environment or detect from curl
     if [[ -z "$SERVER" ]]; then
         # Try to detect from the URL this script was downloaded from
         if [[ -n "$HTTP_REFERER" ]]; then
-            SERVER="$HTTP_REFERER"
+            server_result="$HTTP_REFERER"
         elif [[ -n "$1" ]]; then
-            SERVER="$1"
+            server_result="$1"
         else
-            echo -e "${YELLOW}⚠️  Server address not provided${NC}"
-            read -p "Enter distribution server address (e.g., 192.168.1.100:8080): " SERVER
+            # Provide default server address with option to customize
+            local default_server="http://192.168.1.100:8080"
+            echo -e "${CYAN}🌐 Default server address: $default_server${NC}" >&2
+            echo -e "${YELLOW}Press Enter to accept default, or type a custom server address:${NC}" >&2
+            read -p "Server address: " server_result
+            
+            # Use default if user just pressed Enter
+            if [[ -z "$server_result" ]]; then
+                server_result="$default_server"
+                echo -e "${GREEN}✅ Using default server: $server_result${NC}" >&2
+            else
+                echo -e "${GREEN}✅ Using custom server: $server_result${NC}" >&2
+            fi
         fi
+    else
+        server_result="$SERVER"
     fi
     
     # Ensure http:// prefix
-    if [[ -n "$SERVER" && ! "$SERVER" =~ ^https?:// ]]; then
-        SERVER="http://$SERVER"
+    if [[ -n "$server_result" && ! "$server_result" =~ ^https?:// ]]; then
+        server_result="http://$server_result"
     fi
     
-    echo "$SERVER"
+    echo "$server_result"
 }
 
 get_available_models() {
     local server_url="$1"
     
-    echo -e "${BLUE}📋 Fetching available models from $server_url...${NC}"
+    echo -e "${BLUE}📋 Fetching available models from $server_url...${NC}" >&2
     
     local response
     if ! response=$(curl -fsSL "$server_url/api/models" 2>/dev/null); then
@@ -140,7 +155,7 @@ show_available_models() {
     
     # Parse JSON and display models (requires jq, fallback to basic parsing)
     if command -v jq >/dev/null 2>&1; then
-        echo "$models_json" | jq -r '.[] | "🔹 \(.name):\(.tag)\n   Size: \((.size / 1073741824 * 100 | round) / 100) GB | Modified: \(.modified[:19])\n"'
+        echo "$models_json" | jq -r '.[] | "🔹 \(.name):\(.tag)\n   Size: \((.size / 1024 / 1024 / 1024 * 100 | floor) / 100) GB | Modified: \(.modified[:19])\n"'
     else
         # Basic parsing without jq
         echo "$models_json" | sed 's/},{/}\n{/g' | while read -r line; do
@@ -321,7 +336,7 @@ if [[ -n "$MODEL" ]]; then
         exit 1
     fi
 else
-    echo -e "${CYAN}🚀 Ollama Model Distribution Client${NC}"
+    echo -e "${CYAN}🚀 ollama-lancache Client${NC}"
     echo ""
     show_available_models "$models_json"
     echo ""

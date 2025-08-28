@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Model Distribution Server (Recommended)
+  # ollama-lancache (Recommended)
   ollama-lancache-serve:
     build: .
     container_name: ollama-lancache-serve
