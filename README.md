@@ -4,14 +4,15 @@ A comprehensive model distribution system for efficiently sharing Ollama models 
 
 ## 🎯 Overview
 
-Ollama LanCache is a complete solution for local AI model distribution that reduces bandwidth usage by allowing clients to download models from a local server instead of the internet. The system provides:
+Ollama LanCache is a simple yet powerful HTTP server that allows you to share Ollama models across your local network, reducing bandwidth usage by allowing clients to download models from a local server instead of the internet.
 
-- **🚀 High-performance HTTP server** with session tracking and monitoring
+**Key Features:**
+- **🚀 High-performance HTTP server** with real-time session tracking
 - **📱 Cross-platform client scripts** (Windows PowerShell, Linux/macOS Bash)
 - **📊 Real-time monitoring** with web interface and REST API
-- **📁 File downloads server** for additional resources
-- **🔒 Security features** with path traversal protection
+- **📁 File downloads server** for sharing additional resources
 - **🌐 Multi-client support** with concurrent download tracking
+- **🔒 Security features** with path traversal protection
 
 ## ⚡ Quick Start
 
@@ -37,7 +38,7 @@ make build
 
 The server automatically:
 - ✅ Discovers available models in `~/.ollama/models`
-- ✅ Creates `downloads/` directory for additional files
+- ✅ Creates `downloads/` directory with helpful README
 - ✅ Displays server IP addresses and usage instructions
 - ✅ Serves web interface at `http://your-ip:8080`
 
@@ -70,58 +71,87 @@ curl -fsSL http://192.168.1.100:8080/install.sh | bash -s -- --server 192.168.1.
 ### 🖥️ Web Interface
 
 - **📋 Model catalog** with sizes and modification dates
-- **📝 Copy-paste commands** for all platforms
+- **📝 Copy-paste commands** for all platforms with real server URLs
 - **📊 Real-time session monitoring** at `/api/sessions`
 - **📁 File downloads browser** at `/downloads/`
 - **🎨 Clean, responsive design** with proper UTF-8 emoji support
 
 ### 📊 Session Tracking & Monitoring
 
-- **Real-time progress tracking** with bytes served and completion percentage
-- **Multi-client support** with individual session management
-- **Download timing** with start/stop logging and speed calculations
-- **Session cleanup** with configurable timeout (30 minutes default)
-- **REST API endpoints** for programmatic monitoring
+Real-time tracking of client downloads with detailed progress information:
+
+```bash
+# Check active sessions
+curl http://your-server:8080/api/sessions
+
+# Example response:
+{
+  "active_sessions": [
+    {
+      "client_ip": "192.168.1.50",
+      "model": "granite3.3:8b",
+      "start_time": "2025-01-15T10:30:00Z",
+      "duration": "2m15s",
+      "bytes_served": 2147483648,
+      "files_served": 3,
+      "total_files": 5,
+      "progress_percent": 60
+    }
+  ],
+  "total_sessions": 1
+}
+```
+
+**Server logs provide detailed tracking:**
+```bash
+🚀 [192.168.1.50] Started downloading model: granite3.3:8b (estimated 5 files)
+📄 [192.168.1.50] Manifest served: granite3.3:8b (expecting 5 files)
+🗃️  [192.168.1.50] Blob served: sha256:77bce... (4713.89 MB) - granite3.3:8b
+✅ [192.168.1.50] Completed downloading model: granite3.3:8b
+   📊 Duration: 2m15s | Files: 5/5 | Data: 4.98 GB | Avg Speed: 37.8 MB/s
+```
 
 ### 📁 File Downloads Server
 
-Share additional files alongside models:
+Share additional files alongside models with automatic setup:
 
+**Auto-created on first run:**
+- Creates `downloads/` directory automatically
+- Generates helpful `README.txt` with usage instructions
+- Web interface for browsing and downloading files
+
+**Perfect for sharing:**
+- **📦 Executable files** (.exe, .msi, .deb, .rpm, .dmg)
+- **🗜️ Archive files** (.zip, .tar.gz, .7z, .rar)
+- **📄 Documentation** (.pdf, .txt, .md, .docx)
+- **⚙️ Configuration files** (.json, .yaml, .conf, .ini)
+- **📝 Scripts** (.ps1, .sh, .bat, .py)
+
+**Usage:**
 ```bash
 # Add files to the downloads directory
 cp my-app.exe downloads/
 cp documentation.pdf downloads/
 
-# Access via web browser or direct download
-# http://your-server:8080/downloads/
-# http://your-server:8080/downloads/my-app.exe
+# Files are available at:
+# http://your-server:8080/downloads/           (browse all files)
+# http://your-server:8080/downloads/my-app.exe (direct download)
 ```
-
-Perfect for:
-- **Executable files** (.exe, .msi, .deb, .rpm)
-- **Documentation** (.pdf, .txt, .md)
-- **Archive files** (.zip, .tar.gz, .7z)
-- **Configuration files** and scripts
-
-### 🔒 Security Features
-
-- **Path traversal protection** prevents `../` attacks
-- **Directory restrictions** - only serves files, not subdirectories
-- **File validation** with existence and type checking
-- **Safe defaults** with comprehensive input validation
 
 ## 📋 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Web interface with usage instructions |
+| `/` | GET | Web interface with usage instructions and model catalog |
 | `/api/models` | GET | List available models (JSON) |
 | `/api/info` | GET | Server information and statistics |
-| `/api/sessions` | GET | Active download sessions with progress |
-| `/install.ps1` | GET | PowerShell client script |
-| `/install.sh` | GET | Bash client script |
+| `/api/sessions` | GET | Active download sessions with real-time progress |
+| `/install.ps1` | GET | PowerShell client script (Windows) |
+| `/install.sh` | GET | Bash client script (Linux/macOS) |
 | `/downloads/` | GET | File downloads server and browser |
 | `/downloads/{file}` | GET | Direct file download |
+| `/manifests/{model}` | GET | Model manifest files |
+| `/blobs/{digest}` | GET | Model blob files |
 | `/health` | GET | Health check endpoint |
 
 ## 🛠️ Installation Options
@@ -129,11 +159,12 @@ Perfect for:
 ### Using Make
 
 ```bash
-make build          # Build binary
-make build-all      # Cross-compile for all platforms
+make build          # Build binary for current platform
+make build-all      # Cross-compile for Linux, macOS, Windows
 make test           # Run tests
-make run            # Build and run
-make install        # Install to system
+make run            # Build and run server
+make install        # Install to system PATH
+make clean          # Clean build artifacts
 ```
 
 ### Manual Build
@@ -145,12 +176,12 @@ go build -o ollama-lancache .
 ### Docker
 
 ```bash
-# Using Docker Compose
+# Using Docker Compose (recommended)
 docker-compose up -d
 
-# Manual Docker build
+# Manual Docker build and run
 docker build -t ollama-lancache .
-docker run -p 8080:8080 -v ~/.ollama/models:/models ollama-lancache
+docker run -p 8080:8080 -v ~/.ollama/models:/models:ro -v ./downloads:/app/downloads ollama-lancache
 ```
 
 ## 🔧 Configuration
@@ -172,54 +203,61 @@ Flags:
 
 ```bash
 export OLLAMA_MODELS="/custom/path/to/models"
-export OLLAMA_LANCACHE_PORT=8080
-export OLLAMA_LANCACHE_BIND="0.0.0.0"
-```
-
-## 📊 Monitoring & Logging
-
-### Real-time Session Monitoring
-
-```bash
-# Check active sessions
-curl http://localhost:8080/api/sessions | jq .
-
-# Example response
-{
-  "active_sessions": [
-    {
-      "client_ip": "192.168.1.50",
-      "model": "granite3.3:8b",
-      "start_time": "2025-01-15T10:30:00Z",
-      "duration": "2m15s",
-      "bytes_served": 2147483648,
-      "files_served": 3,
-      "total_files": 5,
-      "progress_percent": 60
-    }
-  ],
-  "total_sessions": 1
-}
-```
-
-### Server Logs
-
-```bash
-🚀 [192.168.1.50] Started downloading model: granite3.3:8b (estimated 5 files)
-📄 [192.168.1.50] Manifest served: granite3.3:8b (expecting 5 files)
-🗃️  [192.168.1.50] Blob served: sha256:77bce... (4713.89 MB) - granite3.3:8b
-✅ [192.168.1.50] Completed downloading model: granite3.3:8b
-   📊 Duration: 2m15s | Files: 5/5 | Data: 4.98 GB | Avg Speed: 37.8 MB/s
 ```
 
 ## 🌐 Multi-Client Support
 
-The system supports unlimited concurrent clients:
+The system supports unlimited concurrent clients with individual tracking:
 
-- **Independent session tracking** per client IP and model
-- **Parallel downloads** with individual progress monitoring
-- **Bandwidth sharing** across multiple clients
-- **Session isolation** prevents interference between clients
+- **🔄 Independent sessions** per client IP and model
+- **📊 Real-time progress** for each download
+- **⚡ Parallel downloads** without interference
+- **🧹 Automatic cleanup** of stale sessions (30-minute timeout)
+
+## 🔍 Monitoring & Troubleshooting
+
+### Health Check
+```bash
+curl http://your-server:8080/health
+# Returns: OK
+```
+
+### Check Available Models
+```bash
+curl http://your-server:8080/api/models | jq .
+```
+
+### Monitor Active Downloads
+```bash
+curl http://your-server:8080/api/sessions | jq .
+```
+
+### Common Issues
+
+**Models not appearing:**
+```bash
+# Verify models directory exists and has content
+ls ~/.ollama/models/manifests/
+ls ~/.ollama/models/blobs/
+```
+
+**Client connection issues:**
+```bash
+# Test server connectivity
+curl http://your-server:8080/health
+
+# Check firewall (if needed)
+sudo ufw allow 8080
+```
+
+**Client downloads not working:**
+```bash
+# Verify client has Ollama installed
+ollama --version
+
+# Check target directory permissions
+ls -la ~/.ollama/models/
+```
 
 ## 🐳 Docker Support
 
@@ -252,16 +290,6 @@ docker run -d \
   ollama-lancache:latest
 ```
 
-## 🔄 CI/CD & Automation
-
-The project includes comprehensive GitHub Actions workflows:
-
-- **Continuous Integration** with automated testing and linting
-- **Cross-platform builds** for Linux, macOS, and Windows
-- **Docker image building** and publishing
-- **Security scanning** with CodeQL and vulnerability checks
-- **Automated releases** with GitHub Releases and assets
-
 ## 📚 Advanced Usage
 
 ### Systemd Service
@@ -276,18 +304,21 @@ sudo systemctl enable ollama-lancache
 sudo systemctl status ollama-lancache
 ```
 
-### Custom Model Directory
+### Custom Configuration
 
 ```bash
 # Use custom models directory
 ./ollama-lancache serve --models-dir /path/to/models --port 8080
+
+# Bind to specific interface
+./ollama-lancache serve --bind 192.168.1.100 --port 8080
 ```
 
 ### Production Deployment
 
 ```bash
 # Build optimized binary
-make build-linux
+make build
 
 # Run with production settings
 ./ollama-lancache serve \
@@ -296,44 +327,23 @@ make build-linux
   --models-dir /opt/ollama/models
 ```
 
-## 🔍 Troubleshooting
+## 🔄 CI/CD & Automation
 
-### Common Issues
+The project includes comprehensive GitHub Actions workflows:
 
-**Models not appearing:**
-```bash
-# Verify models directory
-ls ~/.ollama/models/manifests/
+- **✅ Continuous Integration** - Automated testing and linting
+- **🏗️ Cross-platform builds** - Linux, macOS, Windows binaries
+- **🐳 Docker automation** - Image building and publishing
+- **🔒 Security scanning** - CodeQL and vulnerability checks
+- **📦 Automated releases** - GitHub Releases with cross-platform assets
 
-# Check server logs for errors
-./ollama-lancache serve --port 8080
-```
+## 🎯 How It Works
 
-**Client connection issues:**
-```bash
-# Test server connectivity
-curl http://your-server:8080/health
-
-# Check firewall settings
-sudo ufw allow 8080
-```
-
-**Download failures:**
-```bash
-# Check client-side Ollama installation
-ollama list
-
-# Verify file permissions
-chmod -R 755 ~/.ollama/models/
-```
-
-### Debug Mode
-
-```bash
-# Enable verbose logging
-export OLLAMA_LANCACHE_DEBUG=true
-./ollama-lancache serve --port 8080
-```
+1. **Server Setup**: Run `ollama-lancache serve` on a machine with Ollama models
+2. **Client Discovery**: Clients visit the web interface for copy-paste commands
+3. **Model Download**: Client scripts download models directly to local Ollama installation
+4. **Real-time Tracking**: Server monitors all downloads with progress and timing
+5. **File Sharing**: Additional files available via `/downloads/` endpoint
 
 ## 🤝 Contributing
 
@@ -358,10 +368,10 @@ make run
 
 ### Code Quality
 
-- **Go formatting**: `make fmt`
-- **Linting**: `make lint`
-- **Security scanning**: `make security`
-- **Test coverage**: `make test-coverage`
+- **Formatting**: `make fmt`
+- **Linting**: `make lint` 
+- **Testing**: `make test`
+- **Security**: Built-in path traversal protection
 
 ## 📄 License
 
@@ -371,13 +381,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Built for the [Ollama](https://ollama.ai) ecosystem
 - Inspired by the need for efficient local AI model distribution
-- Thanks to all contributors and users of the project
+- Thanks to all contributors and users
 
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/jjasghar/ollama-lancache/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/jjasghar/ollama-lancache/discussions)
-- **Documentation**: [Project Wiki](https://github.com/jjasghar/ollama-lancache/wiki)
+- **Documentation**: Check the auto-generated `downloads/README.txt` for file sharing instructions
 
 ---
 
