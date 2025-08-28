@@ -1,0 +1,33 @@
+# Simple Docker Compose setup for Ollama LanCache
+# This runs just the model distribution server
+
+version: '3.8'
+
+services:
+  ollama-lancache:
+    image: ghcr.io/jjasghar/ollama-lancache:latest
+    # For local build, comment above and uncomment below:
+    # build: ..
+    container_name: ollama-lancache
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount your Ollama models directory (adjust path as needed)
+      - "${HOME}/.ollama/models:/models:ro"
+    environment:
+      - LOG_LEVEL=info
+    command: ["./ollama-lancache", "serve", "--port", "8080", "--models-dir", "/models"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Usage:
+# 1. Save this file as docker-compose.yml
+# 2. Run: docker-compose up -d
+# 3. Access web interface: http://localhost:8080
+# 4. Install models on clients:
+#    Windows: powershell -c "irm http://your-server-ip:8080/install.ps1 | iex"
+#    Linux/macOS: curl -fsSL http://your-server-ip:8080/install.sh | bash

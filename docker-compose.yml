@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # Model Distribution Server (Recommended)
+  ollama-lancache-serve:
+    build: .
+    container_name: ollama-lancache-serve
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount your Ollama models directory
+      - "${HOME}/.ollama/models:/models:ro"
+    environment:
+      - LOG_LEVEL=info
+    command: ["./ollama-lancache", "serve", "--port", "8080", "--models-dir", "/models"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Registry Proxy Server (Advanced)
+  ollama-lancache-proxy:
+    build: .
+    container_name: ollama-lancache-proxy
+    ports:
+      - "80:80"
+      # Uncomment for DNS server (requires running as privileged)
+      # - "53:53/udp"
+    volumes:
+      # Mount cache directory
+      - "ollama-cache:/cache"
+      # Mount existing models (optional)
+      - "${HOME}/.ollama/models:/cache:rw"
+    environment:
+      - LOG_LEVEL=info
+    command: [
+      "./ollama-lancache", "server",
+      "--cache-dir", "/cache",
+      "--dns-enabled=false",
+      "--http-port", "80"
+    ]
+    restart: unless-stopped
+    # Uncomment for DNS server functionality
+    # privileged: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      # Only run when explicitly requested
+      - proxy
+
+  # Web UI for browsing models (if implemented in future)
+  # ollama-lancache-ui:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.ui
+  #   container_name: ollama-lancache-ui
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - API_URL=http://ollama-lancache-serve:8080
+  #   depends_on:
+  #     - ollama-lancache-serve
+  #   restart: unless-stopped
+  #   profiles:
+  #     - ui
+
+volumes:
+  ollama-cache:
+    driver: local
+
+networks:
+  default:
+    name: ollama-lancache
+    driver: bridge
